@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 =======================================================
  AI-Powered Emergency Green Corridor
@@ -31,7 +31,7 @@ import time
 import argparse
 
 # ── CONFIG — EDIT BEFORE RUNNING ────────────────────────────
-FIREBASE_URL = "https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com"
+FIREBASE_URL = "https://alt-f4-17fe1-default-rtdb.firebaseio.com"
 BAUD_RATE    = 115200
 # ────────────────────────────────────────────────────────────
 

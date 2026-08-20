@@ -62,7 +62,7 @@
 // ============================================================
 //  ★  CHANGE BEFORE FLASHING  ★
 // ============================================================
-#define NODE_ID  1   // 1, 2, or 3
+#define NODE_ID  2   // 1, 2, or 3
 // ============================================================
 
 // ─── Pin Definitions ────────────────────────────────────────
@@ -77,7 +77,7 @@
 #define PKT_PRECLEAR 0x03
 
 // ─── Broadcast MAC ───────────────────────────────────────────
-uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+uint8_t BROADCAST_MAC[6] = {0x08, 0xD1, 0xF9, 0xE1, 0x2B, 0xFC};
 
 // ─── Fixed WiFi channel — MUST match across all 5 boards ────
 #define ESPNOW_CHANNEL 1
