@@ -1,119 +1,25 @@
-﻿import "package:flutter/material.dart";
+import "package:flutter/material.dart";
 import "../services/firebase_service.dart";
 
 class TriggerScreen extends StatefulWidget {
   const TriggerScreen({super.key});
+
   @override
   State<TriggerScreen> createState() => _TriggerScreenState();
 }
 
 class _TriggerScreenState extends State<TriggerScreen> {
-  int _tierA = 1;
-  int _tierB = 2;
-  String? _feedback;
-  bool _sending = false;
+  int tierA = 1;
+  int tierB = 2;
 
-  Future<void> _trigger(String vehicleId, int tier) async {
-    if (_sending) return;
-    setState(() {
-      _sending  = true;
-      _feedback = null;
-    });
-    try {
-      await FirebaseService.pushTriggerRequest(vehicleId, tier);
-      setState(() => _feedback =
-          "✓  Request sent — Vehicle $vehicleId · Tier $tier · Source: flutter_mobile\n"
-          "    Physical operator: press the vehicle button to activate corridor.");
-    } catch (e) {
-      setState(() => _feedback = "✗  Failed: $e");
-    } finally {
-      setState(() => _sending = false);
-    }
-  }
-
-  Widget _vehicleSection(String vehicleId, int selectedTier,
-      ValueChanged<int> onTierChange) {
-    final isA = vehicleId == "A";
-    final accent = isA ? const Color(0xFF2196F3) : const Color(0xFFFF9800);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header
-          Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: accent.withOpacity(0.15),
-              child: Icon(Icons.local_hospital, color: accent, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Text("Vehicle $vehicleId",
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: accent)),
-          ]),
-          const SizedBox(height: 18),
-
-          // Tier selector
-          Text("PRIORITY TIER",
-              style: const TextStyle(
-                  fontSize: 10,
-                  color: Colors.white38,
-                  letterSpacing: 1.1)),
-          const SizedBox(height: 8),
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(
-                  value: 1,
-                  label: Text("Tier 1 — Critical"),
-                  icon: Icon(Icons.priority_high, size: 16)),
-              ButtonSegment(
-                  value: 2,
-                  label: Text("Tier 2 — Standard"),
-                  icon: Icon(Icons.medical_services_outlined, size: 16)),
-            ],
-            selected: {selectedTier},
-            onSelectionChanged: (s) => onTierChange(s.first),
-            style: ButtonStyle(
-              side: MaterialStateProperty.all(
-                  BorderSide(color: accent.withOpacity(0.4))),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Trigger button
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton.icon(
-              icon: _sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.emergency, size: 20),
-              label: Text(
-                _sending
-                    ? "SENDING..."
-                    : "TRIGGER VEHICLE $vehicleId",
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: accent,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: _sending ? null : () => _trigger(vehicleId, selectedTier),
-            ),
-          ),
-        ]),
+  void _trigger(String vehicleId, int tier) {
+    FirebaseService.pushTriggerRequest(vehicleId, tier);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("COMMAND SENT: Override sequence initiated for Vehicle $vehicleId", 
+            style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+        backgroundColor: vehicleId == 'A' ? const Color(0xFF1E88E5) : const Color(0xFFFF8F00),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -121,90 +27,198 @@ class _TriggerScreenState extends State<TriggerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF070B14),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF111111),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
         title: const Row(children: [
-          Icon(Icons.emergency, color: Colors.red),
-          SizedBox(width: 8),
-          Text("Emergency Trigger",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          Icon(Icons.warning_amber_rounded, color: Color(0xFFFF3D00), size: 22),
+          SizedBox(width: 12),
+          Text("MANUAL OVERRIDE COMMAND",
+              style: TextStyle(
+                fontSize: 18, 
+                fontWeight: FontWeight.w800, 
+                letterSpacing: 1.0,
+                color: Colors.white,
+              )),
         ]),
       ),
-      body: SingleChildScrollView(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Context note
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(
-              "Secondary/failsafe trigger path — writes a request to Firebase, "
-              "logged by the bridge. Physical button on the vehicle unit is always primary.",
-              style: TextStyle(
-                  color: Colors.white38, fontSize: 12, height: 1.5),
-            ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            colors: [Color(0xFF0D1629), Color(0xFF070B14)],
+            radius: 1.5,
+            center: Alignment.topCenter,
           ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 24),
+              child: Text(
+                "SECONDARY/FAILSAFE TRIGGER PATH — EXECUTING THIS COMMAND WRITES DIRECTLY TO THE CLOUD UPLINK. PHYSICAL HARDWARE TRIGGER REMAINS PRIMARY.",
+                style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+              ),
+            ),
+            _buildVehicleControlCard(
+              id: "A", 
+              color: const Color(0xFF1E88E5), 
+              tier: tierA, 
+              onTierChanged: (v) => setState(() => tierA = v),
+              onTrigger: () => _trigger("A", tierA),
+            ),
+            const SizedBox(height: 24),
+            _buildVehicleControlCard(
+              id: "B", 
+              color: const Color(0xFFFF8F00), 
+              tier: tierB, 
+              onTierChanged: (v) => setState(() => tierB = v),
+              onTrigger: () => _trigger("B", tierB),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          _vehicleSection("A", _tierA, (t) => setState(() => _tierA = t)),
-          _vehicleSection("B", _tierB, (t) => setState(() => _tierB = t)),
-
-          // Feedback banner
-          if (_feedback != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.all(14),
+  Widget _buildVehicleControlCard({
+    required String id, 
+    required Color color, 
+    required int tier, 
+    required Function(int) onTierChanged,
+    required VoidCallback onTrigger,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withOpacity(0.08), const Color(0xFF0B101E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20, offset: const Offset(0, 10))
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _feedback!.startsWith("✓")
-                      ? const Color(0xFF00C853).withOpacity(0.12)
-                      : Colors.red.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: _feedback!.startsWith("✓")
-                        ? const Color(0xFF00C853)
-                        : Colors.red,
-                    width: 1,
-                  ),
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: color.withOpacity(0.3)),
                 ),
-                child: Text(
-                  _feedback!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.6,
-                    color: _feedback!.startsWith("✓")
-                        ? const Color(0xFF00C853)
-                        : Colors.red,
-                  ),
+                child: Icon(Icons.local_shipping, color: color, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Text("VEHICLE $id", 
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: color, letterSpacing: 1.5)
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+          Text("PRIORITY TIER LEVEL", 
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white54, letterSpacing: 2.0)
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildSegment(
+                title: "TIER 1 - CRITICAL", 
+                icon: Icons.gpp_bad, 
+                isSelected: tier == 1, 
+                activeColor: const Color(0xFFFF3D00),
+                onTap: () => onTierChanged(1),
+              ),
+              const SizedBox(width: 12),
+              _buildSegment(
+                title: "TIER 2 - STANDARD", 
+                icon: Icons.health_and_safety, 
+                isSelected: tier == 2, 
+                activeColor: const Color(0xFF00E676),
+                onTap: () => onTierChanged(2),
+              ),
+            ],
+          ),
+          const SizedBox(height: 36),
+          GestureDetector(
+            onTap: onTrigger,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [color, color.withOpacity(0.7)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                 ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(color: color.withOpacity(0.4), blurRadius: 15, spreadRadius: 2, offset: const Offset(0, 4)),
+                  BoxShadow(color: color.withOpacity(0.2), blurRadius: 30, spreadRadius: 10),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.satellite_alt, color: Colors.white, size: 22),
+                  const SizedBox(width: 12),
+                  Text("TRANSMIT OVERRIDE — VEHICLE $id",
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)
+                  ),
+                ],
               ),
             ),
+          )
+        ],
+      ),
+    );
+  }
 
-          const SizedBox(height: 24),
-
-          // Demo script quote
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.circular(8),
-                border: const Border(
-                    left: BorderSide(color: Color(0xFF00C853), width: 3)),
-              ),
-              child: const Text(
-                '"If the driver can\'t reach the physical button, the co-driver triggers '
-                'the same request from their phone. Same event, same priority logic, '
-                'no difference to the corridor."',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.white54,
-                    fontStyle: FontStyle.italic,
-                    height: 1.6),
-              ),
+  Widget _buildSegment({
+    required String title, 
+    required IconData icon, 
+    required bool isSelected, 
+    required Color activeColor,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor.withOpacity(0.15) : Colors.white.withOpacity(0.02),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? activeColor : Colors.white.withOpacity(0.05),
+              width: isSelected ? 2 : 1,
             ),
           ),
-          const SizedBox(height: 24),
-        ]),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: isSelected ? activeColor : Colors.white38),
+              const SizedBox(width: 8),
+              Text(title, 
+                style: TextStyle(
+                  fontSize: 12, 
+                  fontWeight: FontWeight.bold, 
+                  color: isSelected ? activeColor : Colors.white38,
+                  letterSpacing: 0.5,
+                )
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
