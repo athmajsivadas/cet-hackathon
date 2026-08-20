@@ -1,16 +1,17 @@
 /*
  * ============================================================
  *  AI-POWERED EMERGENCY GREEN CORRIDOR
- *  INTERSECTION NODE FIRMWARE — 30-pin ESP32 DevKit
+ *  INTERSECTION NODE 3 — EXIT NODE (30-pin ESP32 DevKit)
  *  INTIUM 2026 · Smart City Track
  * ============================================================
  *
- *  Flash this sketch to ALL THREE intersection nodes.
+ *  ★ CASCADE DESIGN — ONE GREEN AT A TIME ★
  *
- *  ★ BEFORE FLASHING — change the define below:
- *    Node 1 (entry):  NODE_ID  1
- *    Node 2 (middle): NODE_ID  2
- *    Node 3 (exit):   NODE_ID  3
+ *  Node 3 is the EXIT (cascade) node. It does NOT listen to vehicle
+ *  beacons for arbitration. It only activates when it receives a
+ *  PKT_PRECLEAR from Node 2 (after a vehicle passes Node 2).
+ *
+ *  This is the final step in the cascade. No further relay is sent.
  *
  * ============================================================
  *  PIN MAP (30-pin ESP32 DevKit)
@@ -20,32 +21,15 @@
  *  GPIO 27  - Green  LED  (+ → 220Ω → GPIO27, − → GND)
  *  GPIO 18  - Passage/Confirm push-button (INPUT_PULLUP, active LOW)
  *             Press when the emergency vehicle clears this node.
- *             This moves the node to grant the queued vehicle (if any)
- *             or revert to normal traffic cycle.
- *
- * ============================================================
- *  ARBITRATION SCORE FORMULA (per vehicle, computed at each node)
- * ============================================================
- *  score = base_tier + proximity_bonus + wait_bonus
- *    base_tier      : Tier 1 → 100,  Tier 2 → 60
- *    proximity_bonus: map(dist_dial, 0, 4095, 0, 40)
- *                     Closer dial → higher score
- *    wait_bonus     : wait_ticks × 5  (anti-starvation)
  *
  * ============================================================
  *  NODE STATE MACHINE
  * ============================================================
- *  NORMAL    → normal R/G/Y cycle (5s/5s/2s)
- *  PRECLEAR  → GREEN held for winner vehicle; loser queued
- *  EXTENDED  → GREEN extended: both vehicles are very close —
- *              hold long enough for both to pass in one window
- *  QUEUED    → First vehicle passed; immediately GREEN for queued
+ *  NORMAL   → normal R/G/Y cycle (stays RED until cascade trigger)
+ *  PRECLEAR → GREEN granted on PKT_PRECLEAR from Node 2
+ *  QUEUED   → Immediate GREEN for second queued vehicle
  *
- *  Transitions:
- *    NORMAL     → PRECLEAR/EXTENDED : BEACON received, arbitration wins
- *    PRECLEAR   → QUEUED/NORMAL     : passage-confirm button OR 15s failsafe
- *    EXTENDED   → NORMAL            : extended timer OR 15s failsafe
- *    QUEUED     → NORMAL            : passage-confirm button OR 15s failsafe
+ *  End of cascade — no downstream node to relay to.
  *
  * ============================================================
  *  REQUIREMENTS
@@ -76,6 +60,11 @@
 #define PKT_CONFIRM  0x02
 #define PKT_PRECLEAR 0x03
 
+// ─── Direction Constants ─────────────────────────────────────
+#define DIR_LEFT     'L'
+#define DIR_STRAIGHT 'S'
+#define DIR_RIGHT    'R'
+
 // ─── Broadcast MAC ───────────────────────────────────────────
 uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -83,18 +72,17 @@ uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #define ESPNOW_CHANNEL 1
 
 // ─── Shared Packet Structure ─────────────────────────────────
-// IMPORTANT: byte-for-byte identical to vehicle_unit.ino GCPacket.
-// Any field reorder or size change will corrupt data silently.
 struct __attribute__((packed)) GCPacket {
   uint8_t  type;
   char     vid;
   uint8_t  tier;
   uint16_t dist;
   uint16_t wait_ticks;
-  uint8_t  node_id;        // sender's node (0 = vehicle)
-  uint8_t  target_node_id; // PRECLEAR: intended recipient (0 = all nodes)
+  uint8_t  node_id;
+  uint8_t  target_node_id;
   char     winner;
   char     queued;
+  uint8_t  direction;      // 'L'=Left, 'S'=Straight, 'R'=Right
 };
 
 // ─── Per-vehicle data tracked by this node ───────────────────
@@ -108,6 +96,10 @@ struct VehicleData {
 
 VehicleData vehA = {};
 VehicleData vehB = {};
+
+// Direction received from upstream PRECLEAR (for logging)
+uint8_t cascadeDirection = DIR_STRAIGHT;
+
 
 // ─── MAC Whitelist (Section 11.4-A) ─────────────────────────
 // Fill in all 5 MACs from Hour 1 Step 0 before flashing.
@@ -347,9 +339,6 @@ void enterAllRedBuffer(char winner, char queued, bool extended) {
 // ─── ESP-NOW Receive Callback ────────────────────────────────
 // NOTE: runs in WiFi task context — keep minimal, use flags
 void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
-  // ── MAC Whitelist check (Section 11.4-A) ──────────────────
-  // Reject packets from devices not in the known fleet.
-  // Fill ALLOWED_MACS at the top of this file from Hour 1 Step 0.
   if (!isMACAllowed(mac)) {
     Serial.printf("[NODE%d] Rejected packet from unknown MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
                   NODE_ID,
@@ -360,19 +349,15 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
 
   GCPacket p;
   memcpy(&p, data, sizeof(p));
-  uint32_t now = millis();
 
   // ── BEACON from a vehicle ──────────────────────────────────
+  // Node 3 is the EXIT (cascade) node. It does NOT run arbitration
+  // on raw vehicle beacons — only Node 1 (entry) does that.
+  // Beacons are received here (ESP-NOW is broadcast) but intentionally
+  // ignored — Node 3 only activates when Node 2 sends a PKT_PRECLEAR.
   if (p.type == PKT_BEACON) {
-    if (p.vid == 'A') {
-      vehA = {true, p.tier, p.dist, p.wait_ticks, now};
-    } else if (p.vid == 'B') {
-      vehB = {true, p.tier, p.dist, p.wait_ticks, now};
-    }
-    // Only trigger arbitration when in NORMAL state
-    if (nodeState == STATE_NORMAL) {
-      needArbitration = true;
-    }
+    // Silently ignore — Node 1 handles all beacon arbitration.
+    return;
   }
 
   // ── CONFIRM from a vehicle (passage done) ─────────────────
@@ -380,7 +365,6 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
     if (nodeState == STATE_PRECLEAR ||
         nodeState == STATE_EXTENDED ||
         nodeState == STATE_QUEUED) {
-      // Only accept confirm from the current winner
       if (p.vid == winnerVeh) {
         Serial.printf("[NODE%d] CONFIRM received from Veh %c\n",
                       NODE_ID, p.vid);
@@ -389,18 +373,31 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
     }
   }
 
-  // ── PRECLEAR relay from upstream node ─────────────────────
+  // ── PRECLEAR relay from upstream Node 2 ───────────────────
+  // CASCADE trigger — final step. Vehicle confirmed at Node 2 (STRAIGHT).
+  // Node 3 is the exit node. It activates GREEN here. No further relay.
   else if (p.type == PKT_PRECLEAR) {
-    // Accept only if this node is explicitly targeted (or packet is
-    // broadcast to all nodes, target=0). Silently discard packets
-    // intended for other nodes — prevents double-triggers when e.g.
-    // Node 3 hears Node 1's relay (target=2) and misinterprets it.
-    if (p.target_node_id == NODE_ID || p.target_node_id == 0) {
-      Serial.printf("[NODE%d] Advance notice from Node%d → winner=%c queued=%c\n",
-                    NODE_ID, p.node_id, p.winner, p.queued ? p.queued : '-');
-      // (Future use: pre-position LEDs, display ETA, etc.)
+    if (p.target_node_id == NODE_ID) {
+      cascadeDirection = p.direction ? p.direction : DIR_STRAIGHT;
+      Serial.printf("[NODE%d] ★ CASCADE from Node%d → winner=%c  dir=%c (EXIT)\n",
+                    NODE_ID, p.node_id, p.winner, cascadeDirection);
+      vehA.active = false;
+      vehB.active = false;
+      if (p.winner == 'A') {
+        vehA = {true, 1, 2000, 1, (uint32_t)millis()};
+      } else {
+        vehB = {true, 1, 2000, 1, (uint32_t)millis()};
+      }
+      if (p.queued == 'A') {
+        vehA = {true, 1, 1500, 1, (uint32_t)millis()};
+      } else if (p.queued == 'B') {
+        vehB = {true, 1, 1500, 1, (uint32_t)millis()};
+      }
+      if (nodeState == STATE_NORMAL) {
+        enterAllRedBuffer(p.winner, p.queued, false);
+      }
     }
-    // else: silently discard — intended for a different node
+    // Silently discard packets not for this node
   }
 }
 
