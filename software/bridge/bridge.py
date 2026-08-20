@@ -1,42 +1,27 @@
-#!/usr/bin/env python3
 """
-=======================================================
- AI-Powered Emergency Green Corridor
- Serial → Firebase Realtime Database Bridge
- INTIUM 2026 · Smart City Track
-=======================================================
+bridge.py — Green Corridor Hardware-to-Firebase Bridge
+INTIUM 2026 · Smart City Track
 
- Reads Node 1's Serial output (existing firmware, zero changes needed)
- and mirrors every event to Firebase in real time.
+Reads Serial from Node 1 (USB) and pushes typed event objects
+and real-time node status to Firebase Realtime Database.
 
- Run on the laptop that has Node 1 connected via USB.
- Use a phone hotspot — do NOT rely on venue WiFi.
-
- Usage:
-   python bridge.py --port COM3          (Windows)
-   python bridge.py --port /dev/ttyUSB0  (Linux/Mac)
-
- Setup:
-   pip install -r requirements.txt
-   → Edit FIREBASE_URL below with your project URL.
-
-=======================================================
+Run on the laptop that has Node 1 plugged in via USB:
+  python bridge.py --port COM3
 """
 
-import serial
-import requests
+import sys
 import re
-import json
 import time
 import argparse
+import requests
+import serial
+import serial.tools.list_ports
 
-# ── CONFIG — EDIT BEFORE RUNNING ────────────────────────────
+# ── CONFIG ──────────────────────────────────────────────────
 FIREBASE_URL = "https://alt-f4-17fe1-default-rtdb.firebaseio.com"
 BAUD_RATE    = 115200
 # ────────────────────────────────────────────────────────────
 
-# Regex patterns match the firmware's exact Serial.printf() format strings.
-# Update if you change any print format in the firmware.
 PATTERNS = {
     # [BEACON] Veh=A  tier=1  dist=3200  wait_ticks=  6
     'BEACON': re.compile(
@@ -64,8 +49,14 @@ PATTERNS = {
     # [NODE1] → QUEUED: Immediate GREEN for Veh B
     'QUEUED': re.compile(r'\[NODE(\d)\] → QUEUED.*Veh ([AB])'),
 
-    # [NODE1] → NORMAL (traffic cycle)
+    # [NODE1] CORRIDOR_SYNC: Node1=GREEN, Node2=RED, Node3=RED
+    'CORRIDOR_SYNC': re.compile(
+        r'\[NODE1\] CORRIDOR_SYNC:\s+Node1=(GREEN|YELLOW|RED),\s+Node2=(GREEN|YELLOW|RED),\s+Node3=(GREEN|YELLOW|RED)'),
+
+    # [NODE1] SYNC: GREEN
     'SYNC': re.compile(r'\[NODE(\d)\] SYNC: (GREEN|YELLOW|RED)'),
+
+    # [NODE1] → NORMAL (sequential cycle)
     'NORMAL': re.compile(r'\[NODE(\d)\] → NORMAL'),
 
     # [NODE1] *** FAILSAFE ***
@@ -73,20 +64,15 @@ PATTERNS = {
 
     # [NODE1] All-RED buffer (3s before GREEN)
     'ALLRED': re.compile(r'\[NODE(\d)\] All-RED buffer'),
-
-    # [trigger_requests] — logged but not relayed to hardware in this version
-    'TRIGGER_LOG': re.compile(r'TRIGGER'),
 }
 
-SERVER_TIMESTAMP = {".sv": "timestamp"}  # Firebase server-side timestamp
+SERVER_TIMESTAMP = {".sv": "timestamp"}
 
 
-# ── Firebase helpers ──────────────────────────────────────────
 def fb_post(path, data):
-    """Append a new child (auto-key) under path."""
+    """Append a new child under path."""
     try:
-        r = requests.post(f"{FIREBASE_URL}/{path}.json",
-                          json=data, timeout=4)
+        r = requests.post(f"{FIREBASE_URL}/{path}.json", json=data, timeout=4)
         return r.status_code == 200
     except Exception as e:
         print(f"  [WARN] Firebase POST failed: {e}")
@@ -96,8 +82,7 @@ def fb_post(path, data):
 def fb_put(path, data):
     """Overwrite data at path."""
     try:
-        r = requests.put(f"{FIREBASE_URL}/{path}.json",
-                         json=data, timeout=4)
+        r = requests.put(f"{FIREBASE_URL}/{path}.json", json=data, timeout=4)
         return r.status_code == 200
     except Exception as e:
         print(f"  [WARN] Firebase PUT failed: {e}")
@@ -105,37 +90,29 @@ def fb_put(path, data):
 
 
 def update_node(node_id, state):
-    # Update the actual node
     fb_put(f"node_status/{node_id}", {
         "state": state,
         "last_heartbeat": SERVER_TIMESTAMP,
     })
-    
-    # HACKATHON FIX: Since only Node 1 is plugged into the laptop via USB,
-    # the bridge only sees Node 1's serial logs. We mirror Node 1's state 
-    # to Node 2 and 3 in Firebase so the dashboard reflects the entire corridor properly.
-    if node_id == 1:
-        fb_put(f"node_status/2", {
-            "state": state,
-            "last_heartbeat": SERVER_TIMESTAMP,
-        })
-        fb_put(f"node_status/3", {
-            "state": state,
-            "last_heartbeat": SERVER_TIMESTAMP,
-        })
 
 
-# ── Line parser ───────────────────────────────────────────────
+def update_all_nodes(s1, s2, s3):
+    ts = SERVER_TIMESTAMP
+    fb_put("node_status/1", {"state": s1, "last_heartbeat": ts})
+    fb_put("node_status/2", {"state": s2, "last_heartbeat": ts})
+    fb_put("node_status/3", {"state": s3, "last_heartbeat": ts})
+
+
 def parse_and_push(raw_line):
     """Match one Serial line and push a typed event to Firebase."""
     line = raw_line.strip()
     if not line:
         return
 
-    print(f"  {line}")   # Echo raw line to console for monitoring
+    print(f"  {line}")
     ts = SERVER_TIMESTAMP
 
-    # BEACON ───────────────────────────────────────────────────
+    # BEACON
     m = PATTERNS['BEACON'].search(line)
     if m:
         fb_post("events", {
@@ -148,7 +125,7 @@ def parse_and_push(raw_line):
         })
         return
 
-    # CONFIRM (vehicle passage done) ───────────────────────────
+    # CONFIRM
     m = PATTERNS['CONFIRM'].search(line)
     if m:
         fb_post("events", {
@@ -158,7 +135,7 @@ def parse_and_push(raw_line):
         })
         return
 
-    # ARBITRATION score line ────────────────────────────────────
+    # ARBITRATION score line
     m = PATTERNS['ARB_SCORE'].search(line)
     if m:
         fb_post("events", {
@@ -173,7 +150,7 @@ def parse_and_push(raw_line):
         })
         return
 
-    # ARBITRATION winner decided ────────────────────────────────
+    # ARBITRATION winner decided
     m = PATTERNS['ARB_WINNER'].search(line)
     if m:
         fb_post("events", {
@@ -184,7 +161,19 @@ def parse_and_push(raw_line):
         })
         return
 
-    # PRECLEAR — standard sequential queue ─────────────────────
+    # ALLRED Buffer before green
+    m = PATTERNS['ALLRED'].search(line)
+    if m:
+        node_id = int(m.group(1))
+        fb_post("events", {
+            "type":      "ALLRED_BUFFER",
+            "node_id":   node_id,
+            "timestamp": ts,
+        })
+        update_all_nodes("ALLRED_BUFFER", "ALLRED_BUFFER", "ALLRED_BUFFER")
+        return
+
+    # PRECLEAR — corridor green granted
     m = PATTERNS['PRECLEAR'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -196,10 +185,10 @@ def parse_and_push(raw_line):
             "queued_vehicle":  queued if queued not in ('-', '') else None,
             "timestamp":       ts,
         })
-        update_node(node_id, "GREEN")
+        update_all_nodes("GREEN", "GREEN", "GREEN")
         return
 
-    # EXTENDED — both vehicles close, one wide green window ────
+    # EXTENDED
     m = PATTERNS['EXTENDED'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -209,10 +198,10 @@ def parse_and_push(raw_line):
             "vehicle_id": m.group(2),
             "timestamp":  ts,
         })
-        update_node(node_id, "GREEN")
+        update_all_nodes("GREEN", "GREEN", "GREEN")
         return
 
-    # PASSAGE confirmed at node ─────────────────────────────────
+    # PASSAGE confirmed at node
     m = PATTERNS['PASSAGE'].search(line)
     if m:
         fb_post("events", {
@@ -223,7 +212,7 @@ def parse_and_push(raw_line):
         })
         return
 
-    # QUEUED — immediate GREEN for second vehicle ───────────────
+    # QUEUED
     m = PATTERNS['QUEUED'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -233,20 +222,24 @@ def parse_and_push(raw_line):
             "vehicle_id": m.group(2),
             "timestamp":  ts,
         })
-        update_node(node_id, "GREEN")
+        update_all_nodes("GREEN", "GREEN", "GREEN")
         return
 
+    # CORRIDOR_SYNC — non-synchronous sequential traffic cycle
+    m = PATTERNS['CORRIDOR_SYNC'].search(line)
+    if m:
+        update_all_nodes(m.group(1), m.group(2), m.group(3))
+        return
 
-    # SYNC ─ real-time normal traffic cycle LED updates ────────────────
+    # Individual Node SYNC
     m = PATTERNS['SYNC'].search(line)
     if m:
         node_id = int(m.group(1))
-        color = m.group(2)
-        # We don't spam the event log with these, just update the node status
+        color   = m.group(2)
         update_node(node_id, color)
         return
 
-    # NORMAL — back to standard traffic cycle ───────────────────
+    # NORMAL — back to standard sequential cycle
     m = PATTERNS['NORMAL'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -255,10 +248,10 @@ def parse_and_push(raw_line):
             "node_id":   node_id,
             "timestamp": ts,
         })
-        update_node(node_id, "RED")
+        update_all_nodes("GREEN", "RED", "RED")
         return
 
-    # FAILSAFE auto-revert ──────────────────────────────────────
+    # FAILSAFE
     m = PATTERNS['FAILSAFE'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -267,81 +260,49 @@ def parse_and_push(raw_line):
             "node_id":   node_id,
             "timestamp": ts,
         })
-        update_node(node_id, "RED")
-        return
-
-    # ALL-RED safety buffer ─────────────────────────────────────
-    m = PATTERNS['ALLRED'].search(line)
-    if m:
-        node_id = int(m.group(1))
-        fb_post("events", {
-            "type":      "ALLRED_BUFFER",
-            "node_id":   node_id,
-            "timestamp": ts,
-        })
-        update_node(node_id, "RED")
         return
 
 
-# ── Main ──────────────────────────────────────────────────────
+def auto_detect_port():
+    ports = list(serial.tools.list_ports.comports())
+    for p in ports:
+        desc = (p.description or "").lower()
+        if any(k in desc for k in ["cp210", "ch340", "ftdi", "usb serial", "uart", "esp"]):
+            return p.device
+    return ports[0].device if ports else None
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Green Corridor Serial → Firebase Bridge")
-    parser.add_argument(
-        "--port", default="COM3",
-        help="Serial port of Node 1 (e.g. COM3, /dev/ttyUSB0)")
+    parser = argparse.ArgumentParser(description="Green Corridor Serial-to-Firebase Bridge")
+    parser.add_argument("--port", help="Serial port (e.g. COM3 or /dev/ttyUSB0)")
+    parser.add_argument("--baud", type=int, default=BAUD_RATE)
     args = parser.parse_args()
 
-    print("=" * 55)
-    print("  Green Corridor — Serial → Firebase Bridge")
-    print("  INTIUM 2026 Smart City Track")
-    print("=" * 55)
-    print(f"  Port      : {args.port} @ {BAUD_RATE} baud")
-    print(f"  Firebase  : {FIREBASE_URL}")
-    print()
+    port = args.port or auto_detect_port()
+    if not port:
+        print("[ERROR] No serial port detected.")
+        sys.exit(1)
 
-    # Validate config
-    if "YOUR-PROJECT-ID" in FIREBASE_URL:
-        print("ERROR: Update FIREBASE_URL at the top of this file.")
-        print("  e.g. https://green-corridor-abc12-default-rtdb.firebaseio.com")
-        return
+    print(f"Connecting to Node 1 on {port} @ {args.baud} baud...")
+    try:
+        ser = serial.Serial(port, args.baud, timeout=1)
+    except Exception as e:
+        print(f"[ERROR] Failed to open {port}: {e}")
+        sys.exit(1)
 
-    # Test Firebase connection
-    print("  Testing Firebase... ", end="", flush=True)
-    ok = fb_put("bridge_status", {
-        "online": True,
-        "start_time": SERVER_TIMESTAMP,
-    })
-    print("OK" if ok else "FAILED — check URL and internet access")
-    if not ok:
-        return
-
-    # Initialise node LED states to RED (safe default)
-    for nid in [1, 2, 3]:
-        update_node(nid, "RED")
-    print("  Node states → RED (initialised)")
-    print()
-    print(f"  Listening on {args.port}. Press Ctrl+C to stop.")
-    print()
+    print("Connected. Streaming data to Firebase Realtime Database...")
+    fb_put("bridge_status/online", True)
 
     try:
-        ser = serial.Serial(args.port, BAUD_RATE, timeout=1)
-        time.sleep(2)   # let port settle
-        ser.flushInput()
-
         while True:
-            raw = ser.readline()
+            raw = ser.readline().decode('utf-8', errors='replace')
             if raw:
-                line = raw.decode("utf-8", errors="replace")
-                parse_and_push(line)
-
+                parse_and_push(raw)
     except KeyboardInterrupt:
-        print("\n  Bridge stopped.")
-        fb_put("bridge_status", {"online": False})
-
-    except serial.SerialException as e:
-        print(f"\nSerial error: {e}")
-        print(f"Check that Node 1 is on {args.port} and no other app (e.g. Arduino IDE Serial Monitor) is using it.")
+        print("\nExiting...")
+    finally:
+        fb_put("bridge_status/online", False)
+        ser.close()
 
 
 if __name__ == "__main__":
