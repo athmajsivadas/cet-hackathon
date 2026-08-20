@@ -170,10 +170,10 @@ def parse_and_push(raw_line):
             "node_id":   node_id,
             "timestamp": ts,
         })
-        update_all_nodes("ALLRED_BUFFER", "ALLRED_BUFFER", "ALLRED_BUFFER")
+        update_node(node_id, "ALLRED_BUFFER")
         return
 
-    # PRECLEAR — corridor green granted
+    # PRECLEAR — targeted node green granted
     m = PATTERNS['PRECLEAR'].search(line)
     if m:
         node_id = int(m.group(1))
@@ -185,7 +185,7 @@ def parse_and_push(raw_line):
             "queued_vehicle":  queued if queued not in ('-', '') else None,
             "timestamp":       ts,
         })
-        update_all_nodes("GREEN", "GREEN", "GREEN")
+        update_node(node_id, "GREEN")
         return
 
     # EXTENDED
@@ -198,7 +198,7 @@ def parse_and_push(raw_line):
             "vehicle_id": m.group(2),
             "timestamp":  ts,
         })
-        update_all_nodes("GREEN", "GREEN", "GREEN")
+        update_node(node_id, "GREEN")
         return
 
     # PASSAGE confirmed at node
@@ -222,7 +222,7 @@ def parse_and_push(raw_line):
             "vehicle_id": m.group(2),
             "timestamp":  ts,
         })
-        update_all_nodes("GREEN", "GREEN", "GREEN")
+        update_node(node_id, "GREEN")
         return
 
     # CORRIDOR_SYNC — non-synchronous sequential traffic cycle

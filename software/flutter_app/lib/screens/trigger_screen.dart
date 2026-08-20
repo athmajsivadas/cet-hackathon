@@ -11,12 +11,17 @@ class TriggerScreen extends StatefulWidget {
 class _TriggerScreenState extends State<TriggerScreen> {
   int tierA = 1;
   int tierB = 2;
+  int targetNodeA = 1; // 1 = Left, 2 = Straight, 3 = Right
+  int targetNodeB = 2;
 
-  void _trigger(String vehicleId, int tier) {
+  void _trigger(String vehicleId, int tier, int targetNode) {
     FirebaseService.pushTriggerRequest(vehicleId, tier);
+    final dirLabel = targetNode == 1 ? "LEFT (Node 1)" :
+                     targetNode == 2 ? "STRAIGHT (Node 2)" : "RIGHT (Node 3)";
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("COMMAND SENT: Override sequence initiated for Vehicle $vehicleId", 
+        content: Text("COMMAND SENT: Override initiated for Vehicle $vehicleId → $dirLabel", 
             style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)),
         backgroundColor: vehicleId == 'A' ? const Color(0xFF1E88E5) : const Color(0xFFFF8F00),
         duration: const Duration(seconds: 2),
@@ -57,7 +62,7 @@ class _TriggerScreenState extends State<TriggerScreen> {
             const Padding(
               padding: EdgeInsets.only(bottom: 24),
               child: Text(
-                "SECONDARY/FAILSAFE TRIGGER PATH — EXECUTING THIS COMMAND WRITES DIRECTLY TO THE CLOUD UPLINK. PHYSICAL HARDWARE TRIGGER REMAINS PRIMARY.",
+                "SELECT TARGET INTERSECTION DIRECTION (LEFT / STRAIGHT / RIGHT) & TRANSMIT OVERRIDE.",
                 style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
               ),
             ),
@@ -65,16 +70,20 @@ class _TriggerScreenState extends State<TriggerScreen> {
               id: "A", 
               color: const Color(0xFF1E88E5), 
               tier: tierA, 
+              targetNode: targetNodeA,
               onTierChanged: (v) => setState(() => tierA = v),
-              onTrigger: () => _trigger("A", tierA),
+              onDirectionChanged: (n) => setState(() => targetNodeA = n),
+              onTrigger: () => _trigger("A", tierA, targetNodeA),
             ),
             const SizedBox(height: 24),
             _buildVehicleControlCard(
               id: "B", 
               color: const Color(0xFFFF8F00), 
               tier: tierB, 
+              targetNode: targetNodeB,
               onTierChanged: (v) => setState(() => tierB = v),
-              onTrigger: () => _trigger("B", tierB),
+              onDirectionChanged: (n) => setState(() => targetNodeB = n),
+              onTrigger: () => _trigger("B", tierB, targetNodeB),
             ),
           ],
         ),
@@ -86,9 +95,14 @@ class _TriggerScreenState extends State<TriggerScreen> {
     required String id, 
     required Color color, 
     required int tier, 
+    required int targetNode,
     required Function(int) onTierChanged,
+    required Function(int) onDirectionChanged,
     required VoidCallback onTrigger,
   }) {
+    final dirLabel = targetNode == 1 ? "NODE 1 (LEFT)" :
+                     targetNode == 2 ? "NODE 2 (STRAIGHT)" : "NODE 3 (RIGHT)";
+
     return Container(
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
@@ -123,7 +137,42 @@ class _TriggerScreenState extends State<TriggerScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
+          
+          // Target Intersection Direction
+          Text("TARGET INTERSECTION ROUTE", 
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white54, letterSpacing: 2.0)
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildSegment(
+                title: "LEFT (N1)", 
+                icon: Icons.turn_left, 
+                isSelected: targetNode == 1, 
+                activeColor: const Color(0xFF4FC3F7),
+                onTap: () => onDirectionChanged(1),
+              ),
+              const SizedBox(width: 8),
+              _buildSegment(
+                title: "STRAIGHT (N2)", 
+                icon: Icons.straight, 
+                isSelected: targetNode == 2, 
+                activeColor: const Color(0xFF81C784),
+                onTap: () => onDirectionChanged(2),
+              ),
+              const SizedBox(width: 8),
+              _buildSegment(
+                title: "RIGHT (N3)", 
+                icon: Icons.turn_right, 
+                isSelected: targetNode == 3, 
+                activeColor: const Color(0xFFFFB74D),
+                onTap: () => onDirectionChanged(3),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
           Text("PRIORITY TIER LEVEL", 
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white54, letterSpacing: 2.0)
           ),
@@ -147,7 +196,7 @@ class _TriggerScreenState extends State<TriggerScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 36),
+          const SizedBox(height: 32),
           GestureDetector(
             onTap: onTrigger,
             child: Container(
@@ -170,8 +219,8 @@ class _TriggerScreenState extends State<TriggerScreen> {
                 children: [
                   const Icon(Icons.satellite_alt, color: Colors.white, size: 22),
                   const SizedBox(width: 12),
-                  Text("TRANSMIT OVERRIDE — VEHICLE $id",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)
+                  Text("TRANSMIT OVERRIDE → $dirLabel",
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.2)
                   ),
                 ],
               ),
@@ -206,15 +255,18 @@ class _TriggerScreenState extends State<TriggerScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 16, color: isSelected ? activeColor : Colors.white38),
-              const SizedBox(width: 8),
-              Text(title, 
-                style: TextStyle(
-                  fontSize: 12, 
-                  fontWeight: FontWeight.bold, 
-                  color: isSelected ? activeColor : Colors.white38,
-                  letterSpacing: 0.5,
-                )
+              Icon(icon, size: 15, color: isSelected ? activeColor : Colors.white38),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(title, 
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11, 
+                    fontWeight: FontWeight.bold, 
+                    color: isSelected ? activeColor : Colors.white38,
+                    letterSpacing: 0.3,
+                  )
+                ),
               ),
             ],
           ),

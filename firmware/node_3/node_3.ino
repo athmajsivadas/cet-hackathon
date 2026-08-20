@@ -326,6 +326,10 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
 
   // ── BEACON from a vehicle ──────────────────────────────────
   if (p.type == PKT_BEACON) {
+    // Only accept if targeted for THIS node (or broadcast 0)
+    if (p.target_node_id != 0 && p.target_node_id != NODE_ID) {
+      return;
+    }
     if (p.vid == 'A') {
       vehA = {true, p.tier, p.dist, p.wait_ticks, now};
     } else if (p.vid == 'B') {
@@ -338,6 +342,9 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
 
   // ── CONFIRM from a vehicle ─────────────────────────────────
   else if (p.type == PKT_CONFIRM) {
+    if (p.target_node_id != 0 && p.target_node_id != NODE_ID) {
+      return;
+    }
     if (nodeState == STATE_PRECLEAR ||
         nodeState == STATE_EXTENDED ||
         nodeState == STATE_QUEUED) {
@@ -350,7 +357,7 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
 
   // ── PRECLEAR relay from upstream node ─────────────────────
   else if (p.type == PKT_PRECLEAR) {
-    if (nodeState == STATE_NORMAL) {
+    if (p.target_node_id == NODE_ID && nodeState == STATE_NORMAL) {
       Serial.printf("[NODE%d] PRECLEAR from Node%d → Preempting for Veh %c\n",
                     NODE_ID, p.node_id, p.winner);
       enterPreclear(p.winner, p.queued, false);
