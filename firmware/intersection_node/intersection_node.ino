@@ -504,14 +504,17 @@ void loop() {
         normalPhase   = 1;
         normalTimerMs = now;
         setLED(false, false, true);   // GREEN
+        Serial.printf("[NODE%d] SYNC: GREEN\n", NODE_ID);
       } else if (normalPhase == 1 && cycleElapsed >= NORMAL_GREEN_MS) {
         normalPhase   = 2;
         normalTimerMs = now;
         setLED(false, true, false);   // YELLOW
+        Serial.printf("[NODE%d] SYNC: YELLOW\n", NODE_ID);
       } else if (normalPhase == 2 && cycleElapsed >= NORMAL_YELLOW_MS) {
         normalPhase   = 0;
         normalTimerMs = now;
         setLED(true, false, false);   // RED
+        Serial.printf("[NODE%d] SYNC: RED\n", NODE_ID);
       }
       break;
     }

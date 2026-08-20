@@ -65,6 +65,7 @@ PATTERNS = {
     'QUEUED': re.compile(r'\[NODE(\d)\] → QUEUED.*Veh ([AB])'),
 
     # [NODE1] → NORMAL (traffic cycle)
+    'SYNC': re.compile(r'\[NODE(\d)\] SYNC: (GREEN|YELLOW|RED)'),
     'NORMAL': re.compile(r'\[NODE(\d)\] → NORMAL'),
 
     # [NODE1] *** FAILSAFE ***
@@ -233,6 +234,16 @@ def parse_and_push(raw_line):
             "timestamp":  ts,
         })
         update_node(node_id, "GREEN")
+        return
+
+
+    # SYNC ─ real-time normal traffic cycle LED updates ────────────────
+    m = PATTERNS['SYNC'].search(line)
+    if m:
+        node_id = int(m.group(1))
+        color = m.group(2)
+        # We don't spam the event log with these, just update the node status
+        update_node(node_id, color)
         return
 
     # NORMAL — back to standard traffic cycle ───────────────────

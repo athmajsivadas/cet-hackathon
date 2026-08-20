@@ -1,20 +1,16 @@
 /*
  * ============================================================
  *  AI-POWERED EMERGENCY GREEN CORRIDOR
- *  INTERSECTION NODE 1 — ENTRY NODE (30-pin ESP32 DevKit)
+ *  INTERSECTION NODE FIRMWARE — 30-pin ESP32 DevKit
  *  INTIUM 2026 · Smart City Track
  * ============================================================
  *
- *  ★ CASCADE DESIGN — ONE GREEN AT A TIME ★
+ *  Flash this sketch to ALL THREE intersection nodes.
  *
- *  Node 1 is the ENTRY node. It is the ONLY node that listens
- *  to vehicle beacons and runs the priority arbitration engine.
- *
- *  When a vehicle passes Node 1, it sends PKT_PRECLEAR to Node 2.
- *  Node 2 then goes green, and on passage sends PKT_PRECLEAR to Node 3.
- *
- *  This ensures only ONE intersection is green at any moment,
- *  preventing unnecessary traffic congestion on the other roads.
+ *  ★ BEFORE FLASHING — change the define below:
+ *    Node 1 (entry):  NODE_ID  1
+ *    Node 2 (middle): NODE_ID  2
+ *    Node 3 (exit):   NODE_ID  3
  *
  * ============================================================
  *  PIN MAP (30-pin ESP32 DevKit)
@@ -24,13 +20,16 @@
  *  GPIO 27  - Green  LED  (+ → 220Ω → GPIO27, − → GND)
  *  GPIO 18  - Passage/Confirm push-button (INPUT_PULLUP, active LOW)
  *             Press when the emergency vehicle clears this node.
+ *             This moves the node to grant the queued vehicle (if any)
+ *             or revert to normal traffic cycle.
  *
  * ============================================================
- *  ARBITRATION SCORE FORMULA (run at Node 1 only)
+ *  ARBITRATION SCORE FORMULA (per vehicle, computed at each node)
  * ============================================================
  *  score = base_tier + proximity_bonus + wait_bonus
  *    base_tier      : Tier 1 → 100,  Tier 2 → 60
  *    proximity_bonus: map(dist_dial, 0, 4095, 0, 40)
+ *                     Closer dial → higher score
  *    wait_bonus     : wait_ticks × 5  (anti-starvation)
  *
  * ============================================================
@@ -38,10 +37,15 @@
  * ============================================================
  *  NORMAL    → normal R/G/Y cycle (5s/5s/2s)
  *  PRECLEAR  → GREEN held for winner vehicle; loser queued
- *  EXTENDED  → GREEN extended: both vehicles are very close
+ *  EXTENDED  → GREEN extended: both vehicles are very close —
+ *              hold long enough for both to pass in one window
  *  QUEUED    → First vehicle passed; immediately GREEN for queued
  *
- *  On passage confirm: sends PKT_PRECLEAR to Node 2 to cascade.
+ *  Transitions:
+ *    NORMAL     → PRECLEAR/EXTENDED : BEACON received, arbitration wins
+ *    PRECLEAR   → QUEUED/NORMAL     : passage-confirm button OR 15s failsafe
+ *    EXTENDED   → NORMAL            : extended timer OR 15s failsafe
+ *    QUEUED     → NORMAL            : passage-confirm button OR 15s failsafe
  *
  * ============================================================
  *  REQUIREMENTS
@@ -72,11 +76,6 @@
 #define PKT_CONFIRM  0x02
 #define PKT_PRECLEAR 0x03
 
-// ─── Direction Constants ─────────────────────────────────────
-#define DIR_LEFT     'L'
-#define DIR_STRAIGHT 'S'
-#define DIR_RIGHT    'R'
-
 // ─── Broadcast MAC ───────────────────────────────────────────
 uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -93,10 +92,9 @@ struct __attribute__((packed)) GCPacket {
   uint16_t dist;
   uint16_t wait_ticks;
   uint8_t  node_id;        // sender's node (0 = vehicle)
-  uint8_t  target_node_id; // PRECLEAR: intended recipient
+  uint8_t  target_node_id; // PRECLEAR: intended recipient (0 = all nodes)
   char     winner;
   char     queued;
-  uint8_t  direction;      // 'L'=Left, 'S'=Straight, 'R'=Right
 };
 
 // ─── Per-vehicle data tracked by this node ───────────────────
@@ -106,7 +104,6 @@ struct VehicleData {
   uint16_t dist;
   uint16_t wait_ticks;
   uint32_t last_seen_ms;
-  uint8_t  direction;   // 'L', 'S', 'R' — copied from beacon packet
 };
 
 VehicleData vehA = {};
@@ -194,22 +191,24 @@ int computeScore(uint8_t tier, uint16_t dist, uint16_t wait_ticks) {
   return base + prox + waits;
 }
 
-// ─── Cascade PRECLEAR ─────────────────────────────────────────
-// Sent ONLY when a vehicle confirms passage at THIS node and its
-// direction is STRAIGHT — triggers the next downstream node to go GREEN.
-// For LEFT or RIGHT turns the vehicle leaves the corridor, so no relay.
-void sendCascadePreclear(char winner, char queued, uint8_t direction) {
+// ─── PRECLEAR Relay ──────────────────────────────────────────
+// Broadcast to all nodes, but target_node_id tells receivers
+// whether this is meant for them. Each node filters on this field
+// so Node 3 silently discards Node 1's relay (target=2) and vice
+// versa — prevents double-triggers or out-of-sequence reactions.
+void sendPreclear(char winner, char queued) {
   GCPacket p;
   memset(&p, 0, sizeof(p));
   p.type           = PKT_PRECLEAR;
   p.node_id        = NODE_ID;
-  p.target_node_id = NODE_ID + 1;  // next downstream node
+  p.target_node_id = NODE_ID + 1; // target is the next downstream node
+                                   // (Node 4 won't exist — Node 3 relay is
+                                   //  broadcast-only, no downstream to act on it)
   p.winner         = winner;
   p.queued         = queued;
-  p.direction      = direction;
   esp_now_send(BROADCAST_MAC, (uint8_t*)&p, sizeof(p));
-  Serial.printf("[NODE%d] ★ CASCADE → Node%d  winner=%c  dir=%c\n",
-                NODE_ID, NODE_ID + 1, winner, direction);
+  Serial.printf("[NODE%d] PRECLEAR relay → target=Node%d  winner=%c  queued=%c\n",
+                NODE_ID, NODE_ID + 1, winner, queued ? queued : '-');
 }
 
 // ─── State Transitions ───────────────────────────────────────
@@ -219,7 +218,7 @@ void enterNormal() {
   normalPhase   = 0;
   winnerVeh     = 0;
   queuedVeh     = 0;
-  setLED(true, false, false);
+  setLED(true, false, false);  // Start RED
   Serial.printf("[NODE%d] → NORMAL (traffic cycle)\n", NODE_ID);
 }
 
@@ -231,16 +230,16 @@ void enterPreclear(char winner, char queued, bool extended) {
 
   if (extended) {
     nodeState = STATE_EXTENDED;
-    Serial.printf("[NODE%d] → EXTENDED GREEN  winner=%c  loser=%c\n",
+    Serial.printf("[NODE%d] → EXTENDED GREEN  (both vehicles close)"
+                  "  winner=%c  loser=%c  both pass same window\n",
                   NODE_ID, winner, queued ? queued : '?');
   } else {
     nodeState = STATE_PRECLEAR;
     Serial.printf("[NODE%d] → PRECLEAR  winner=%c  queued=%c\n",
                   NODE_ID, winner, queued ? queued : '-');
   }
-  // ★ No cascade relay here — we wait for passage CONFIRM before
-  // triggering the next node. Cascading immediately would make two
-  // intersections green at once while the vehicle is still at Node 1.
+
+  sendPreclear(winner, queued);
 }
 
 // Called when passage is confirmed (button press or PKT_CONFIRM)
@@ -250,42 +249,24 @@ void passageConfirmed(char vehicleId) {
   Serial.printf("[NODE%d] Passage confirmed: Veh %c cleared\n",
                 NODE_ID, vehicleId);
 
-  // Look up this vehicle's intended direction
-  uint8_t dir = (vehicleId == 'A') ? vehA.direction : vehB.direction;
-  if (dir == 0) dir = DIR_STRAIGHT;   // default fallback
-
-  // Mark as recently cleared — suppress re-trigger from lingering beacons
+  // Mark this vehicle as recently cleared — ignore its beacons briefly
   clearedVeh     = vehicleId;
   clearedUntilMs = millis() + CLEARED_IGNORE_MS;
 
   if (queuedVeh && queuedVeh != vehicleId) {
-    // ── Case 1: Queued vehicle still waiting at this node ──────
-    // Grant it GREEN immediately. Cascade for the confirming vehicle
-    // fires NOW (it is physically heading toward the next intersection).
-    if (dir == DIR_STRAIGHT) {
-      sendCascadePreclear(vehicleId, 0, dir);
-    } else {
-      Serial.printf("[NODE%d] dir=%c → vehicle leaving corridor, no cascade\n",
-                    NODE_ID, dir);
-    }
+    // Immediately grant GREEN to queued vehicle
     char nextWinner = queuedVeh;
     winnerVeh    = nextWinner;
     queuedVeh    = 0;
     nodeState    = STATE_QUEUED;
     stateEnterMs = millis();
-    setLED(false, false, true);
+    setLED(false, false, true);  // Immediate GREEN — no yellow pause
     Serial.printf("[NODE%d] → QUEUED: Immediate GREEN for Veh %c\n",
                   NODE_ID, winnerVeh);
+    sendPreclear(winnerVeh, 0);
   } else {
-    // ── Case 2: No queued vehicle — corridor clear ──────────────
-    // Cascade to next node based on direction, then revert to normal.
-    if (dir == DIR_STRAIGHT) {
-      sendCascadePreclear(vehicleId, 0, dir);
-    } else {
-      Serial.printf("[NODE%d] dir=%c → vehicle leaving corridor, no cascade\n",
-                    NODE_ID, dir);
-    }
-    setLED(false, true, false);
+    // No queued vehicle or EXTENDED mode complete → normal cycle
+    setLED(false, true, false);  // Flash YELLOW briefly before RED
     delay(800);
     enterNormal();
   }
@@ -384,9 +365,9 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
   // ── BEACON from a vehicle ──────────────────────────────────
   if (p.type == PKT_BEACON) {
     if (p.vid == 'A') {
-      vehA = {true, p.tier, p.dist, p.wait_ticks, now, p.direction};
+      vehA = {true, p.tier, p.dist, p.wait_ticks, now};
     } else if (p.vid == 'B') {
-      vehB = {true, p.tier, p.dist, p.wait_ticks, now, p.direction};
+      vehB = {true, p.tier, p.dist, p.wait_ticks, now};
     }
     // Only trigger arbitration when in NORMAL state
     if (nodeState == STATE_NORMAL) {
@@ -523,14 +504,17 @@ void loop() {
         normalPhase   = 1;
         normalTimerMs = now;
         setLED(false, false, true);   // GREEN
+        Serial.printf("[NODE%d] SYNC: GREEN\n", NODE_ID);
       } else if (normalPhase == 1 && cycleElapsed >= NORMAL_GREEN_MS) {
         normalPhase   = 2;
         normalTimerMs = now;
         setLED(false, true, false);   // YELLOW
+        Serial.printf("[NODE%d] SYNC: YELLOW\n", NODE_ID);
       } else if (normalPhase == 2 && cycleElapsed >= NORMAL_YELLOW_MS) {
         normalPhase   = 0;
         normalTimerMs = now;
         setLED(true, false, false);   // RED
+        Serial.printf("[NODE%d] SYNC: RED\n", NODE_ID);
       }
       break;
     }
