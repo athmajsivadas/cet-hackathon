@@ -1,4 +1,4 @@
-﻿import "package:flutter/material.dart";
+import "package:flutter/material.dart";
 import "../services/firebase_service.dart";
 
 class DashboardScreen extends StatelessWidget {
@@ -7,28 +7,56 @@ class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF070B14), // Deep cyber-blue background
       appBar: AppBar(
-        backgroundColor: const Color(0xFF111111),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
         title: const Row(children: [
-          Icon(Icons.traffic, color: Color(0xFF00C853)),
-          SizedBox(width: 8),
-          Text("Green Corridor Monitor",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          Icon(Icons.radar, color: Color(0xFF00E676), size: 22),
+          SizedBox(width: 12),
+          Text("Green Corridor Command",
+              style: TextStyle(
+                fontSize: 18, 
+                fontWeight: FontWeight.w700, 
+                letterSpacing: 0.5,
+                color: Colors.white,
+              )),
         ]),
         actions: [
           // Live bridge connection indicator
           Padding(
-            padding: const EdgeInsets.only(right: 14),
+            padding: const EdgeInsets.only(right: 20),
             child: StreamBuilder<bool>(
               stream: FirebaseService.bridgeOnlineStream(),
               builder: (_, snap) {
                 final online = snap.data ?? false;
-                return Tooltip(
-                  message: online ? "Bridge online" : "Bridge offline",
-                  child: Icon(
-                    online ? Icons.wifi : Icons.wifi_off,
-                    size: 18,
-                    color: online ? const Color(0xFF00C853) : Colors.red,
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: online ? const Color(0xFF00E676).withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: online ? const Color(0xFF00E676).withOpacity(0.3) : Colors.red.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        online ? Icons.wifi : Icons.wifi_off,
+                        size: 14,
+                        color: online ? const Color(0xFF00E676) : Colors.red,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        online ? "BRIDGE ONLINE" : "OFFLINE",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                          color: online ? const Color(0xFF00E676) : Colors.red,
+                        ),
+                      )
+                    ],
                   ),
                 );
               },
@@ -36,74 +64,99 @@ class DashboardScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Column(children: [
-        // ── Node Status Cards ────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-          child: StreamBuilder<Map<int, String>>(
-            stream: FirebaseService.nodeStatusStream(),
-            builder: (_, snap) {
-              final status = snap.data ?? {1: "RED", 2: "RED", 3: "RED"};
-              return Row(
-                children: [1, 2, 3]
-                    .map((id) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: _NodeCard(
-                                nodeId: id, state: status[id] ?? "RED"),
-                          ),
-                        ))
-                    .toList(),
-              );
-            },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            colors: [Color(0xFF0D1629), Color(0xFF070B14)],
+            radius: 1.5,
+            center: Alignment.topCenter,
           ),
         ),
-
-        // ── Log header ───────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(children: [
-            const Icon(Icons.list_alt, size: 14, color: Colors.white38),
-            const SizedBox(width: 6),
-            Text("Live Event Log",
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: Colors.white38, letterSpacing: 0.8)),
-          ]),
-        ),
-
-        // ── Event log list ───────────────────────────────────
-        Expanded(
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: FirebaseService.eventsStream(),
-            builder: (_, snap) {
-              if (snap.hasError) {
-                return Center(
-                    child: Text("Firebase error: ${snap.error}",
-                        style: const TextStyle(color: Colors.red)));
-              }
-              if (!snap.hasData || snap.data!.isEmpty) {
-                return const Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    CircularProgressIndicator(strokeWidth: 2),
-                    SizedBox(height: 12),
-                    Text("Waiting for events from Node 1...",
-                        style: TextStyle(color: Colors.white38, fontSize: 13)),
-                  ]),
+        child: Column(children: [
+          const SizedBox(height: 10),
+          // ── Node Status Cards ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: StreamBuilder<Map<int, String>>(
+              stream: FirebaseService.nodeStatusStream(),
+              builder: (_, snap) {
+                final status = snap.data ?? {1: "RED", 2: "RED", 3: "RED"};
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [1, 2, 3].map((id) {
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 280),
+                          child: _NodeCard(nodeId: id, state: status[id] ?? "RED"),
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 );
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: snap.data!.length,
-                separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: Color(0xFF222222)),
-                itemBuilder: (_, i) => _EventTile(event: snap.data![i]),
-              );
-            },
+              },
+            ),
           ),
-        ),
-      ]),
+          
+          const SizedBox(height: 20),
+
+          // ── Log header ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Row(children: [
+              const Icon(Icons.receipt_long, size: 16, color: Colors.white54),
+              const SizedBox(width: 8),
+              Text("LIVE EVENT STREAM",
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(
+                        color: Colors.white54, 
+                        letterSpacing: 1.2, 
+                        fontWeight: FontWeight.w600,
+                      )),
+            ]),
+          ),
+
+          // ── Event log list ──
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0B101E).withOpacity(0.5),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+              ),
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: FirebaseService.eventsStream(),
+                builder: (_, snap) {
+                  if (snap.hasError) {
+                    return Center(
+                        child: Text("Connection error: ${snap.error}",
+                            style: const TextStyle(color: Colors.red)));
+                  }
+                  if (!snap.hasData || snap.data!.isEmpty) {
+                    return const Center(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E676)),
+                        SizedBox(height: 16),
+                        Text("Awaiting telemetry from Node 1...",
+                            style: TextStyle(color: Colors.white54, fontSize: 13, letterSpacing: 0.5)),
+                      ]),
+                    );
+                  }
+                  return ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: snap.data!.length,
+                    itemBuilder: (_, i) => _EventTile(event: snap.data![i]),
+                  );
+                },
+              ),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -114,47 +167,113 @@ class _NodeCard extends StatelessWidget {
   final String state;
   const _NodeCard({required this.nodeId, required this.state});
 
-  Color get _ledColor {
-    switch (state) {
-      case "GREEN":  return const Color(0xFF00C853);
-      case "YELLOW": return const Color(0xFFFFD600);
-      default:       return const Color(0xFFD50000);
-    }
+  Widget _buildLight(Color onColor, bool isOn) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      width: 44,
+      height: 44,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        // When off, look like dark recessed glass. When on, bright vivid color.
+        gradient: isOn 
+            ? RadialGradient(
+                colors: [Colors.white, onColor, onColor.withOpacity(0.8)],
+                stops: const [0.0, 0.4, 1.0],
+              )
+            : RadialGradient(
+                colors: [Colors.black, Colors.black87, onColor.withOpacity(0.05)],
+              ),
+        border: Border.all(
+          color: isOn ? onColor.withOpacity(0.8) : Colors.white.withOpacity(0.02),
+          width: 2,
+        ),
+        boxShadow: isOn
+            ? [
+                BoxShadow(color: onColor.withOpacity(0.6), blurRadius: 20, spreadRadius: 6),
+                BoxShadow(color: onColor.withOpacity(0.3), blurRadius: 40, spreadRadius: 15),
+              ]
+            : [
+                const BoxShadow(color: Colors.black54, blurRadius: 4, inset: true)
+              ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _ledColor.withOpacity(0.5), width: 1.5),
-      ),
-      child: Column(children: [
-        Text("NODE $nodeId",
-            style: const TextStyle(
-                fontSize: 10, color: Colors.white38, letterSpacing: 1.2)),
-        const SizedBox(height: 10),
-        // LED dot with glow
-        Container(
-          width: 26,
-          height: 26,
-          decoration: BoxDecoration(
-            color: _ledColor,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                  color: _ledColor.withOpacity(0.65), blurRadius: 10, spreadRadius: 2)
-            ],
-          ),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF141D2D), Color(0xFF0D1421)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        const SizedBox(height: 8),
-        Text(state,
-            style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.bold, color: _ledColor)),
-      ]),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.08), width: 1),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20, offset: const Offset(0, 10))
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text("INTERSECTION",
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white.withOpacity(0.4), letterSpacing: 2.0)),
+          Text("NODE $nodeId",
+              style: const TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1.5)),
+          const SizedBox(height: 24),
+          // Classic Traffic Light Housing (Aesthetic version)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF05070A),
+              borderRadius: BorderRadius.circular(40),
+              border: Border.all(color: Colors.white.withOpacity(0.05), width: 2),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.8), blurRadius: 10, offset: const Offset(0, 8), inset: true),
+                BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 15, offset: const Offset(0, 5)),
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildLight(const Color(0xFFFF2A2A), state == "RED" || state == "ALLRED_BUFFER"),
+                _buildLight(const Color(0xFFFFC400), state == "YELLOW"),
+                _buildLight(const Color(0xFF00E676), state == "GREEN"),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            decoration: BoxDecoration(
+              color: _getStateColor(state).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _getStateColor(state).withOpacity(0.3)),
+            ),
+            child: Text(
+              state.replaceAll("_", " "),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+                color: _getStateColor(state),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  Color _getStateColor(String state) {
+    if (state == "GREEN") return const Color(0xFF00E676);
+    if (state == "YELLOW") return const Color(0xFFFFC400);
+    return const Color(0xFFFF2A2A);
   }
 }
 
@@ -166,30 +285,30 @@ class _EventTile extends StatelessWidget {
   Color get _color {
     switch (event["type"]) {
       case "WINNER_DECIDED":
-      case "ARBITRATION":    return const Color(0xFFFFA726);  // orange
+      case "ARBITRATION":    return const Color(0xFFFFB74D);  // soft orange
       case "PRECLEAR":
       case "EXTENDED":
-      case "QUEUED_GREEN":   return const Color(0xFF00C853);  // green
-      case "PASSAGE_CONFIRM": return const Color(0xFF29B6F6); // blue
-      case "FAILSAFE_REVERT": return const Color(0xFFF44336); // red
-      case "ALLRED_BUFFER":   return const Color(0xFFEF5350); // light red
-      case "NORMAL":          return Colors.white30;
-      default:                return Colors.white24;
+      case "QUEUED_GREEN":   return const Color(0xFF00E676);  // bright green
+      case "PASSAGE_CONFIRM": return const Color(0xFF4FC3F7); // light blue
+      case "FAILSAFE_REVERT": return const Color(0xFFE57373); // soft red
+      case "ALLRED_BUFFER":   return const Color(0xFFFF8A65); // deep orange
+      case "NORMAL":          return Colors.white54;
+      default:                return Colors.white38;
     }
   }
 
   IconData get _icon {
     switch (event["type"]) {
       case "BEACON":          return Icons.wifi_tethering;
-      case "ARBITRATION":     return Icons.balance;
-      case "WINNER_DECIDED":  return Icons.emoji_events;
-      case "PRECLEAR":        return Icons.traffic;
-      case "EXTENDED":        return Icons.open_in_full;
-      case "PASSAGE_CONFIRM": return Icons.check_circle_outline;
+      case "ARBITRATION":     return Icons.memory;
+      case "WINNER_DECIDED":  return Icons.military_tech;
+      case "PRECLEAR":        return Icons.rocket_launch;
+      case "EXTENDED":        return Icons.all_out;
+      case "PASSAGE_CONFIRM": return Icons.task_alt;
       case "QUEUED_GREEN":    return Icons.queue_play_next;
-      case "FAILSAFE_REVERT": return Icons.warning_amber_rounded;
-      case "ALLRED_BUFFER":   return Icons.pause_circle_outline;
-      case "NORMAL":          return Icons.loop;
+      case "FAILSAFE_REVERT": return Icons.gpp_bad;
+      case "ALLRED_BUFFER":   return Icons.front_hand;
+      case "NORMAL":          return Icons.sync;
       default:                return Icons.info_outline;
     }
   }
@@ -197,27 +316,27 @@ class _EventTile extends StatelessWidget {
   String get _text {
     final t  = event["type"]       ?? "";
     final v  = event["vehicle_id"] ?? "";
-    final n  = event["node_id"] != null ? "Node${event["node_id"]}" : "";
+    final n  = event["node_id"] != null ? "Node ${event["node_id"]}" : "";
     switch (t) {
       case "ARBITRATION":
-        return "$n  Veh $v  tier=${event["tier"]}  dist=${event["dist_dial"]}  score=${event["score"]}";
+        return "$n: Veh $v [Tier ${event["tier"]}]  dist=${event["dist_dial"]}  →  Score: ${event["score"]}";
       case "WINNER_DECIDED":
-        return "$n  ▶  WINNER → Vehicle $v";
+        return "$n: ARBITRATION WON → Vehicle $v overrides intersection";
       case "PRECLEAR":
         final q = event["queued_vehicle"];
-        return "$n  GREEN for Veh $v${q != null ? "  (queued: $q)" : ""}";
+        return "$n: PRE-CLEARING GREEN for Vehicle $v${q != null ? " (Veh $q queued)" : ""}";
       case "EXTENDED":
-        return "$n  EXTENDED GREEN — Veh $v  (both vehicles close)";
+        return "$n: EXTENDED GREEN — Maintaining for Vehicle $v";
       case "PASSAGE_CONFIRM":
-        return "${n.isEmpty ? "" : "$n  "}Veh $v passage confirmed";
+        return "${n.isEmpty ? "" : "$n: "}Vehicle $v passage confirmed securely";
       case "QUEUED_GREEN":
-        return "$n  Immediate GREEN → queued Veh $v";
+        return "$n: IMMEDIATE GREEN → Queued Vehicle $v";
       case "NORMAL":
-        return "$n  → Normal traffic cycle";
+        return "$n: Returned to standard automated traffic cycle";
       case "FAILSAFE_REVERT":
-        return "$n  ★ FAILSAFE — auto-reverted after 15s";
+        return "$n: FAILSAFE TRIGGERED — Reverting after 15s timeout";
       case "ALLRED_BUFFER":
-        return "$n  All-RED safety buffer (3s)";
+        return "$n: Executing All-RED safety buffer (3.0s)";
       default:
         return t;
     }
@@ -225,14 +344,32 @@ class _EventTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _color.withOpacity(0.1)),
+      ),
       child: Row(children: [
-        Icon(_icon, size: 15, color: _color),
-        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: _color.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(_icon, size: 16, color: _color),
+        ),
+        const SizedBox(width: 16),
         Expanded(
           child: Text(_text,
-              style: TextStyle(fontSize: 12, color: _color, height: 1.4)),
+              style: TextStyle(
+                fontSize: 13, 
+                color: Colors.white.withOpacity(0.9), 
+                height: 1.4,
+                letterSpacing: 0.3,
+              )),
         ),
       ]),
     );
