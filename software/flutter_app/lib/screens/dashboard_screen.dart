@@ -195,7 +195,7 @@ class _NodeCard extends StatelessWidget {
                 BoxShadow(color: onColor.withOpacity(0.3), blurRadius: 40, spreadRadius: 15),
               ]
             : [
-                const BoxShadow(color: Colors.black54, blurRadius: 4, inset: true)
+                const BoxShadow(color: Colors.black54, blurRadius: 4)
               ],
       ),
     );
@@ -235,7 +235,7 @@ class _NodeCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(40),
               border: Border.all(color: Colors.white.withOpacity(0.05), width: 2),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.8), blurRadius: 10, offset: const Offset(0, 8), inset: true),
+                BoxShadow(color: Colors.black.withOpacity(0.8), blurRadius: 10, offset: const Offset(0, 8)),
                 BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 15, offset: const Offset(0, 5)),
               ]
             ),
